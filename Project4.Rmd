@@ -1,0 +1,1207 @@
+Financial Contribution Analysis by Shawar Nawaz
+========================================================
+
+This dataset represents the most important candidates that ran for the 2016
+U.S Presidential elections and the contributions that they received in the state
+of Florida. I decided to use the state of Florida as it has been considered a 
+major swing state in the elections consisting of 29 electoral votes. So, it is
+obvious to see why the candidates seem to fight so hard for this state.
+
+The dataset not only contains the contribution amounts, but also the city, the
+job title, the organization they worked for, their zipcodes and the date of the 
+contributions as well which leaves us with a lot of data to help us analyze,
+who tended to contribute to who based on various features.
+
+The data has been taken from the Federal Election Comittee website.
+
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, packages}
+library(ggplot2)
+library(scales)
+library(lubridate)
+library(maps)
+library(dplyr)
+library(zipcode)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, Load_the_Data}
+# Load the Data
+getwd()
+setwd(paste('C:\\Users\\shawar\\Desktop\\Data Analyst Nanodegree',
+            '\\Unit 4 - R Programming', sep = ''))
+contributions <- read.csv(paste('C:\\Users\\shawar\\Desktop',
+                                '\\Data Analyst Nanodegree',
+'\\Unit 4 - R Programming\\FL-election.csv', sep = ''))
+```
+
+# Univariate Plots Section
+# Univariate Analysis
+
+### What is the structure of your dataset?
+```{r echo=FALSE, Univariate_Plots}
+str(contributions)
+```
+
+
+
+The dataset consists of 426057 rows and  19 columns. (I will be deleting some
+of these columns as they are not important for my analysis)
+
+4 columns have integers/numbers as data. The rest are have different number
+of categorical variables in a factor format.
+
+### What is/are the main feature(s) of interest in your dataset?
+
+The fields that are of interest to me are the the candidate name(cand_nm),  zipcodes(contbr_zip),  contribution amount(contb_receipt_amt) and date of contribution(contb_receipt_dt) as well the contributors themselves.
+
+I didnt require the 'receipt_desc', 'memo_cd', 'memo_text', 'form_tp',
+'file_num', 'tran_id' columns. So I decided to remove them.
+
+```{r}
+names(contributions)
+```
+
+```{r}
+unwanted_columns <- c('receipt_desc', 'memo_cd', 'memo_text', 'form_tp',
+                      'file_num', 'tran_id', 'cmte_id')
+
+contributions <- contributions[, !names(contributions) %in% unwanted_columns]
+```
+
+
+
+
+### What other features in the dataset do you think will help support your
+### investigation into your feature(s) of interest?
+
+Contributor occupations(contbr_occupation) will help me analyze this dataset
+better. I will also be adding new columns based on other parameters.
+
+### Did you create any new variables from existing variables in the dataset?
+
+Other paramaters that I have created are coordinates data, type of donations,
+types of contributor occupations, split the dates into day, month and years. 
+I have also distributed the candidates based on their party affiliations. 
+
+```{r}
+contributions$date <- as.Date(contributions$contb_receipt_dt,
+                              format = '%d-%B-%y')
+contributions$day <- day(contributions$date)
+contributions$month <- month(contributions$date)
+contributions$year <- year(contributions$date)
+
+```
+
+
+
+Creating vectors of candidates based on party affiliations and adding them 
+to the data frame.
+
+
+```{r}
+dem <- c("Clinton, Hillary Rodham", "Sanders, Bernard", "O'Malley,
+         Martin Joseph", "Webb, James Henry Jr.", "Lessig, Lawrence")
+others <- c('Johnson, Gary', 'Stein, Jill', 'McMullin, Evan')
+
+contributions$party <- ifelse(contributions$cand_nm %in% others, "O",
+                         ifelse(contributions$cand_nm %in% dem, "D", "R"))
+```
+
+
+
+
+
+### Of the features you investigated, were there any unusual distributions?
+### Did you perform any operations on the data to tidy, adjust, 
+### or change the form of the data? If so, why did you do this?
+
+Looking through the data, I had noticed there were some negative 
+contributions(refunds) in the dataset. I decided to ignore these and work 
+without them.
+
+Looking through the zipcodes, I noticed there were zipcodes in the 5 digit 
+format, as well as the additional digits in some of the cases. I decided to 
+clean the data set to retain only the first 5 digits.
+
+Some of the zipcodes represent locations outside Florida. I got rid of these 
+values as well.
+
+
+
+```{r}
+contributions <- filter(contributions, contb_receipt_amt >= 1)
+colnames(contributions)[10] <- 'amount'
+```
+
+
+
+I knew I would have to look deeper into the contributions based on the jobs
+people had. So I decided to look at the different job titles by grouping them
+together.
+
+
+
+```{r}
+contb_occ_types <- contributions%>%
+  group_by(contbr_occupation)%>%
+  summarise(count = n())%>%
+  arrange(desc(count))
+
+contb_occ_types
+```
+
+
+
+As you can see, there were 12380 different types of job titles which would be 
+very cumbersome to handle, so I decided to split the contributors based on the type of employment.
+
+So, I decided to divide them among a business owner or CEO, unemployed or 
+retired and 'other'.
+
+The issue I came across this was that, different terms were used to describe 
+the same thing. For example, a person who had his own business wrote in 
+'SELF'(sometimes 'SELLF'), 'OWN', 'OWNER' and different versions of these terms.
+
+SO I decided to create a regular expression that finds these patterns and 
+puts the person in the right group.
+
+A similar process was done for unemployed people.
+
+```{r}
+self <- c("SELF", "OWN", "OWNER", "SELLF", "CEO")
+unemployed <- c('RETIRED', 'NONE', 'NOT', 'UNEMPLOYED')
+
+contributions$emp_type <- ifelse(grepl(paste(self, collapse = "|"), contributions$contbr_occupation), 'SELF',
+                              ifelse(grepl(paste(unemployed, collapse = "|"), contributions$contbr_occupation), 'UNEMPLOYED', 'OTHER'))
+
+contributions$zipcode <- as.integer(substr(contributions$contbr_zip, 1, 5))
+
+
+```
+
+
+
+I also created a column to distribute the contributions to various categorical
+values
+
+
+```{r}
+contributions$donation_type <- ifelse(contributions$amount<= 100, 'V_small', 
+                                          ifelse(contributions$amount %in% 
+                                                   c(101:1000), 'Medium',
+                                                 ifelse(contributions$amount 
+                                                        %in% c(1001:5000),
+                                                        'Large', 'V_Large')))
+```
+
+
+
+I then distributed the different occupations to whether a person was
+an employee, running his own business( CEOs also included in this group)
+and unemployed.
+
+
+
+
+I also added the zipcodes library so that i could map the zipcodes in this
+dataset to those in the zipcodes dataset, thus allowing me to acquire the
+coordinates data.
+
+
+
+```{r}
+data("zipcode")
+contributions <- merge(contributions, zipcode, by.x = 'zipcode', by.y = 'zip')
+
+```
+
+
+```{r}
+contributions <- filter(contributions, state == 'FL')
+```
+
+
+
+The final column I added was to differentiate between the different regions
+of Florida, whether they were an urban city or a rural area.
+
+
+
+```{r}
+cities <- c('Miami', 'Miami Beach', 'Tampa', 'Orlando', 'Jacksonville',
+            'Fort Myers', 'Gainesville',
+            'Tallahassee', 'Fort Lauderdale', 'Jacksonville Beach',
+            'Saint Petersburg')
+contributions$location_type <- ifelse(contributions$city %in% cities,
+                                      'Urban', 'Rural')
+```
+
+
+
+Then, I decided to remove all additional columns that I didnt require anymore.
+
+
+
+```{r}
+names(contributions)
+extra_columns <- c('cand_id', 'contbr_city', 'contbr_st', 'contbr_zip', 
+                   'contb_receipt_dt')
+contributions <- contributions[, !names(contributions) %in% extra_columns]
+```
+
+
+
+
+I also decided to make a subset of the final presidential nominees.
+
+I also decided to ignore the contributions from before the year 2015.
+
+I then took the presidential subset and grouped it together by candidate name.
+This was done to show the percentages of contributions each received with 
+respect to the other and will be depicted in the conclusions.
+
+
+
+```{r}
+presidential <- filter(contributions, cand_nm %in% c('Clinton, Hillary Rodham',
+                                                     'Trump, Donald J.',
+                                                     'Johnson, Gary', 
+                                                     'Stein, Jill'))
+
+contributions <- filter(contributions, date >= '2015-01-01')
+
+pres_contb <- presidential%>%
+  group_by(cand_nm)%>%
+  summarise(total = sum(amount),
+            mean = mean(amount),
+            median = median(amount),
+            number_contb = n())%>%
+  arrange(desc(total), number_contb)
+
+
+pres_contb$percent_number_contb <- (pres_contb$number_contb * 100)/sum(pres_contb$number_contb)
+
+
+pres_contb$percent_contb <- (pres_contb$total * 100)/sum(pres_contb$total)
+
+
+pres_contb
+```
+
+
+
+Now that the data is clean, it was time to begin the analysis.
+
+The first plot that seemed of interest was the distribution of contributions.
+
+
+
+```{r}
+ggplot(data = contributions, aes(x= amount))+
+  geom_histogram(binwidth = 250)+
+  coord_cartesian(xlim = c(0,4000))+
+  xlab('Contribution Amount ($) ')+
+  ylab('Number of Contributions')+
+  scale_y_continuous(labels = comma)+
+  ggtitle('Number of different donations')+
+  theme(plot.title = element_text(hjust = 0.5))
+  
+```
+
+
+
+
+As we can see, the data is positively skewed and some of the data isn't
+clearly visible. So it is better to convert the x axes to log scale
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+qplot(data = contributions, x = amount, fill = 'red')+
+  scale_x_log10(breaks = c(5, 10, 25, 50, 100, 250, 500, 1000, 2000))+
+  xlab('Contribution Amount ($) ')+
+  ylab('Number of Contributions')+
+  guides(fill=FALSE)+
+  ggtitle('Number of different donations')+
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+
+
+
+I decided to create a summary of the contributions
+
+```{r}
+summary(contributions$amount)
+```
+
+
+
+
+As expected, the mean and median are not close to each other at all, owing
+to the skew in the data distribution.
+
+I decided to split up the data and look at the number of donations based
+on each candidate.
+For that, I had to group the data by each candidate.
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+cand_contb <- contributions%>%
+  group_by(cand_nm, party)%>%
+  summarise(total = sum(amount),
+            mean = mean(amount),
+            median = median(amount),
+            number_contb = n())%>%
+  arrange(desc(total), median)
+
+cand_contb
+
+
+ggplot(data = cand_contb, 
+       aes(x = reorder(cand_nm, number_contb), y = number_contb))+
+  geom_bar(stat = 'identity', fill = 'red')+
+  coord_flip()+
+  geom_text(aes(label = number_contb), hjust = 0)+
+  ylab('Total number of Contributions')+
+  xlab('Candidate Name')+
+  ggtitle('Number of Contributions per Candidate')+
+  theme(axis.title.y = element_text(size = 15), 
+        plot.title = element_text(hjust = 0.5))
+```
+
+
+
+I wasn't surprised to see both the democrats at the top of the list for
+number of contributions as they are known to receive a lot of smaller
+denomination contributions.
+
+Then I decided to look at the people who had the highest number of
+contributions. So i had to create another group.
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+cont_by_comp <- contributions%>%
+  group_by(contbr_nm,contbr_occupation)%>%
+  summarise(total = sum(amount),
+            mean = round(mean(amount)),
+            median= round(median(amount)),
+            n = n())%>%
+  arrange(desc(total))
+cont_by_comp
+
+
+ggplot(data = cont_by_comp[1:10,], aes(x = reorder(contbr_nm, n), y = n))+
+  geom_bar(stat = 'identity', fill = 'red')+
+  geom_text(aes(label = n), hjust = 0)+
+  coord_flip()+
+  ylab('Total number of Contributions')+
+  xlab('Contributor Name')+
+  ggtitle('Total number of Contributions per Contributor')+
+  theme(axis.title.y = element_text(size = 15), 
+        plot.title = element_text(hjust = 0.5))
+```
+
+
+
+I was curious to know from the above graph whether the person who made the 
+highest number of contributions also contributed the most. I go into more detail
+in a later section
+
+I decided to have a look at how to number of contributions changed over time.
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+major_candidates <- c('Sanders, Bernard', 'Bush, Jeb', 'Rubio, Marco', 
+                      'Clinton, Hillary Rodham', 'Trump, Donald J.')
+
+ggplot(data = contributions[contributions$cand_nm %in% major_candidates,], 
+aes(x = date))+
+  geom_freqpoly(aes(color = cand_nm))+
+  geom_vline(xintercept = as.numeric(as.Date('2016-07-20')), size = 1,
+             linetype = 'dashed', color ='green')+
+  scale_x_date(date_breaks = '3 months')+
+  ylab('Number of Contributions')+
+  ggtitle('Number of contributions by date')+
+  theme(legend.position=c(0.3,0.8),plot.title = element_text(hjust = 0.5))
+
+```
+
+
+
+Some of the candidates stopped receiving contributions after a certain date. 
+This is because they dropped out of the presidential race.
+
+Rubio dropped out around mid march, Jeb Bush around the end of February and 
+Bernie Sanders lost to Hillary Clinton in the primaries. These dates also 
+coincide with the data in the graph above 
+
+Finally, for the univariate section, I wanted to check how much people 
+contributed based on their job status.
+
+
+```{r}
+contb_by_occ <- contributions%>%
+  group_by(emp_type, party)%>%
+  summarise(total = sum(amount),
+            mean = round(mean(amount)),
+            median = round(median(amount)),
+            n = n())%>%
+  arrange(desc(total))
+```
+
+```{r}
+ggplot(data = contb_by_occ, aes(x = reorder(emp_type, n),
+                                y = n))+
+  geom_bar(stat = 'identity', fill = 'red')+
+  ylab('Number Contributions')+
+  xlab('Type of Occupation')+
+  ggtitle('Number of Contributions per Occupation Type')+
+  theme(axis.title.y = element_text(size = 15), 
+        plot.title = element_text(hjust = 0.5))
+```
+
+
+
+
+People who ran their own businesses tended to have fewer number of 
+contributions whereas people with regular jobs tended to have the most. This 
+seemed fairly obvious to me since the number of people doing regular jobs 
+far outweigh the number of people running their own business.
+
+
+Finally I decided to look at contributions based on location type. I had 
+to create a group based on their location and filtered out the data from
+people who didnt belong to a mainstream party.
+
+
+
+```{r}
+con_loc <- contributions%>%
+  filter(party != 'O')%>%
+  group_by(location_type, party)%>%
+  summarise(mean = mean(amount),
+            median = median(amount),
+            total = sum(amount),
+            n = n())%>%
+  arrange(desc(total))
+
+
+
+ggplot(data = con_loc, aes(x = reorder(location_type, n),
+                                y = n))+
+  geom_bar(stat = 'identity', fill = 'red')+
+  ylab('Number of Contributions')+
+  xlab('Location type')+
+  ggtitle('Number of Contributions per Location Type')+
+  theme(axis.title.y = element_text(size = 15), 
+        plot.title = element_text(hjust = 0.5))
+```
+
+
+
+
+Number of contributions is lesser in the urban areas than in the rural areas.
+
+Finally, I wanted to compare the contributions per time for the party nominees.
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(data = presidential, aes(x = date))+
+  geom_freqpoly(aes(color = cand_nm))+
+  geom_vline(xintercept = as.numeric(as.Date("2016-11-09")), size = 1,
+             linetype = 'dashed')+
+  xlab('Date')+
+  ylab('Number of Contributions')+
+  ggtitle('Number of contributions per Final candidate')+
+  geom_vline(xintercept = as.numeric(as.Date('2016-07-20')), size = 1,
+             linetype = 'dashed', color ='green')
+```
+
+
+
+The green dashed line is the date around the conventions for each party.
+The black line is election day. 
+
+We can see a gradual and constant increase in number of donations for 
+Mrs. Clinton from the beginning of the year, and sudden spikes in and 
+around the convention. There was a sharp drop in contributions immediately 
+after election day for both candidates, which makes sense. 
+
+Donald Trump had a uniform number of contributions throughout the year up 
+until the convention where the contributions had a huge spike followed by 
+a huge drop after.
+
+Curious thing is, he still had contributions coming in a whole month after 
+the election.
+
+
+# Bivariate Plots Section
+```{r echo=FALSE, Bivariate_Plots}
+
+```
+
+# Bivariate Analysis
+
+### Talk about some of the relationships you observed in this part of the 
+### investigation. How did the feature(s) of interest vary with other features
+### in the dataset?
+
+Earlier I noticed that the major democratic candidates had more number of 
+contributions. I was expecting them to also top the list in terms of amount 
+of money contributed.
+
+```{r}
+ggplot(data = cand_contb, 
+       aes(x = reorder(cand_nm, total), y = total))+
+  geom_bar(stat = 'identity', fill = 'red')+
+  coord_flip()+
+  geom_text(aes(label = total), hjust = 0)+
+  ylab('Total amount of Contributions($)')+
+  xlab('Candidate Name')+
+  ggtitle('Total Contributions per Candidate')+
+  theme(axis.title.y = element_text(size = 15), 
+        plot.title = element_text(hjust = 0.5))
+```
+
+
+
+I was a little surprised at first to see that Bernie Sanders was in 6th. So 
+I plotted the median contributions below and noticed that his median 
+contributions were joint lowest. 
+
+
+It is important to note here that Jeb Bush and Marco Rubio are high up on 
+this list despite dropping out of the race early. It is important to note 
+here that Jeb Bush was governer of Florida and Marco Rubio has been  a 
+senator in Florida for years.
+
+```{r}
+ggplot(data = cand_contb, 
+       aes(x = reorder(cand_nm, median), y = median))+
+  geom_bar(stat = 'identity', fill = 'red')+
+  coord_flip()+
+  geom_text(aes(label = median), hjust = 0)+
+  ylab('Median amount of Contributions($)')+
+  xlab('Candidate Name')+
+  ggtitle('Median Contributions per Candidate')+
+  theme(axis.title.y = element_text(size = 15), 
+        plot.title = element_text(hjust = 0.5))
+```
+
+
+
+I was a little surprised to see Hillary Clinton at the bottom of this 
+graph despite her raising the most money from contributions. Another 
+look at the number of donations graph in the beginning showed that she 
+had many more contributions than the rest.
+
+
+I then wanted to see who made the most contributions. So I plotted a graph to
+return the top 10 in highest contributions.
+
+
+
+```{r}
+ggplot(data = cont_by_comp[1:10,], aes(x = reorder(contbr_nm, total),
+                                       y = total))+
+  geom_bar(stat = 'identity', fill = 'red')+
+  geom_text(aes(label = total), hjust = 0)+
+  coord_flip()+
+  ylab('Total in Contributions($)')+
+  xlab('Contributor Name')+
+  ggtitle('Total Contributions per Contributor')+
+  theme(axis.title.y = element_text(size = 15), 
+        plot.title = element_text(hjust = 0.5))
+```
+
+
+
+
+The people who contributed the most amount of money didnt necessarily make 
+the most number of donations. I will go deeper into this in a later plot to 
+see if there was a relationship between the number of contributions vs the 
+amount of money raised.
+
+
+
+I then decided to look at the amounts contributed based on occupation type
+
+```{r}
+ggplot(data = contb_by_occ, aes(x = reorder(emp_type, total),
+                                y = total))+
+  geom_bar(stat = 'identity', fill = 'red')+
+  ylab('Total Contribution ($)')+
+  xlab('Type of Occupation')+
+  ggtitle('Total Contribution per Occupation Type')+
+  theme(axis.title.y = element_text(size = 15), 
+        plot.title = element_text(hjust = 0.5))
+```
+
+
+
+Total contributions seem to be the least for people who were self employed 
+whereas people who worked regular jobs contributed the most. A point to note 
+here is that the number of people who were self employed and contributed were
+much fewer than the rest as shown from the earlier graph. The median 
+contributions will give us a better idea.
+
+
+
+
+```{r}
+ggplot(data = contb_by_occ, aes(x = reorder(emp_type, median),
+                                y = median))+
+  geom_bar(stat = 'identity', fill = 'red')+
+  ylab('Median Contributions ($)')+
+  xlab('Type of Occupation')+
+  ggtitle('Median Contributions per Occupation Type')+
+  theme(axis.title.y = element_text(size = 15), 
+        plot.title = element_text(hjust = 0.5))
+```
+
+
+
+
+The median contributions from self employed people were more than that of the 
+rest, but what surprised me here was that it was much lesser than I expected.
+
+
+
+I then proceeded to have a look at the total contribution based on location 
+type.
+
+
+
+
+```{r}
+ggplot(data = con_loc, aes(x = reorder(location_type, total),
+                                y = total))+
+  geom_bar(stat = 'identity', fill = 'red')+
+  ylab('Total Contribution ($)')+
+  xlab('Type of Location')+
+  ggtitle('Total Contribution per Location Type')+
+  theme(axis.title.y = element_text(size = 15), 
+        plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+ggplot(data = con_loc, aes(x = reorder(location_type, total),
+                                y = median))+
+  geom_bar(stat = 'identity', fill = 'red')+
+  ylab('Median Contribution ($)')+
+  xlab('Type of Location')+
+  ggtitle('Median Contribution per Location Type')+
+  theme(axis.title.y = element_text(size = 15), 
+        plot.title = element_text(hjust = 0.5))
+```
+
+
+
+The two graphs above didn't really surprise me as I expected median 
+contributions of people living in urban areas to be higher than than of rural
+areas, but not high enough to bump the total contributions higher than that of
+rural areas owing to the high number of donations made by people in rural areas.
+
+At this point, I wanted to take only the presidential data and split the 
+contributions between urban and rural areas to compare between the candidates.
+
+```{r}
+by_pres_location <- presidential%>%
+  group_by(cand_nm, location_type)%>%
+  summarise(total = round(sum(amount)),
+            mean = mean(amount),
+            median = median(amount),
+            n = n())%>%
+  arrange(cand_nm, location_type)
+
+```
+
+
+
+Proceeding to find relationships between the number of contributions 
+vs the amount contributed. I needed the grouped variable I had created 
+earlier cont_by_comp.
+
+
+
+```{r}
+ggplot(data = cont_by_comp, aes(x = n, y = median))+
+  geom_point(alpha = 0.4, color = 'red')+
+  scale_y_log10(breaks = c(1,5,10, 50, 100, 250, 500, 1000, 2000))+
+  scale_x_continuous(breaks = c(1, 4, 9, 19, 25, 50, 75, 100))+
+  coord_cartesian(xlim = c(0,100), ylim = c(1,5500))+
+  geom_smooth(method = 'lm', formula = y~x)+
+  geom_vline(xintercept = 4, size = 1,
+             linetype = 'dashed', color = 'dark green')+
+  geom_vline(xintercept = 9, size = 1,
+             linetype = 'dashed', color = 'purple')+
+  geom_vline(xintercept = 19, size = 1,
+             linetype = 'dashed', color = 'black')+
+  geom_line(stat = 'summary', fun.y = 'quantile', fun.args=list(probs=0.9))+
+  xlab('Number of Contributions per Person')+
+  ylab('Median contribution per person ($)')+
+  ggtitle('Relationship between median contribution vs Number of contribution')+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+
+
+
+This graph shows that people who made large number of contributions tended 
+to make smaller contributions(albeit the relationship isnt as strong as I 
+imagined). The black solid line in the graph depicts the upper quartile for the
+number of contributions.
+
+I've drawn 3 dotted vertical lines at certain points in the graph which I 
+found interesting. There seems to be a sharp drop in upper quartile donation
+from people who made 1 contribution to 4 contributions, followed by another 
+sharp drop to people who made 9 contributions. Then it remains steady till 
+people who made 19 contributions and from there on, there are ups and downs but 
+the general trend seems to be a steady and constant decline.
+
+I also wanted to look at how contributions varied between the same months of 
+two different years. So first, I had to group the data by year and month. Then 
+I plotted the data to show the difference in contributions for each year.
+
+
+
+```{r}
+by_month <- contributions%>%
+  group_by(year, month)%>%
+  summarise(total = round(sum(amount)),
+            mean = mean(amount),
+            median = median(amount),
+            n = n())%>%
+  arrange(year, month)
+
+ggplot(data = by_month, aes(x = month, y = total))+
+  geom_line()+
+  scale_x_continuous(breaks = c(1,3,5,7,9,11))+
+  facet_grid(year~.)+
+  ylab('Total amount of contributions ($)')+
+  xlab('Month')+
+  ggtitle('Total Contribution per Month')+
+  theme(plot.title = element_text(hjust = 0.5), legend.position = 'none')
+```
+
+
+
+
+June was a good month in both years with a spike in contributions from May.
+
+The graph matched my expectation from march to may 2016 with downward trends 
+in total contributions. This was probably due to two major contestants in Marco
+Rubio and Jeb Bush dropping out of the race. 
+
+The graph also seemed to agree with me in thinking that contributions increased
+as the conventions for both parties were approaching. It also increased up until
+September as election day was nearing.
+
+What surprised me was the last couple of months before election day where there
+was a steep drop in total contributions especially considering that Florida was
+a major swing state for whom both presidential candidates campaigned hard for.
+
+After this, I wanted to check where majority of the contributions came from. 
+So I grouped the contributions by coordinates and plotted the result.
+
+I created a new variable from the maps library called 'FL' which has the 
+coordinate data of the state of Florida. Then I grouped the data from my 
+dataset by those coordinates and plotted the data over them.
+
+
+
+```{r}
+FL <- map_data("state", region="Florida")
+
+by_coord <- contributions%>%
+  group_by(latitude, longitude, party)%>%
+  summarise(total = sum(amount),
+            mean = mean(amount),
+            median = median(amount),
+            n = n())
+
+ggplot()+
+  geom_polygon(data = FL, aes(x = long, y = lat),
+               color = 'black', fill = NA)+
+  geom_point(data= by_coord, aes(x = longitude, y = latitude, size = total), 
+             color = 'red', alpha =0.4)+
+  xlab('Longitude')+
+  ylab('Latitude')+
+  ggtitle('Number of Contributions based on Location')
+
+```
+
+
+
+
+The contributions came from a large number of places all across the state. 
+In a later section, I go deeper into this plot, to check which presidential 
+candidate received more money on the basis of location type (Urban/Rural).
+
+
+### What was the strongest relationship you found?
+
+plotting of contribution size vs number of contributions seemed to have an 
+inverse relationship to an extent but it wasn't as stong as I had hoped.
+
+
+
+# Multivariate Analysis
+
+### Talk about some of the relationships you observed in this part of the
+### investigation. Were there features that strengthened each other in terms 
+### of looking at your feature(s) of interest?
+
+
+Earlier, we had taken a look at the total contributions per occupation type. I
+decided to go a bit deeper and see how contributions were distributed by them
+along with party affiliations.
+
+
+```{r}
+ggplot(data = contb_by_occ, aes(x = reorder(emp_type, n),
+                                y = n))+
+  geom_bar(stat = 'identity', aes(fill = party), position = 'dodge')+
+  ylab('Number of Contribution')+
+  xlab('Type of Occupation')+
+  scale_fill_manual(values=c("blue", "darkgreen", "red"))+
+  ggtitle('Number of Contribution per Occupation Type')+
+  theme(axis.title.y = element_text(size = 15), 
+        plot.title = element_text(hjust = 0.5))
+```
+
+
+
+```{r}
+ggplot(data = contb_by_occ, aes(x = reorder(emp_type, total),
+                                y = total))+
+  geom_bar(stat = 'identity', aes(fill = party), position = 'dodge')+
+  ylab('Total Contribution')+
+  xlab('Type of Occupation')+
+  scale_fill_manual(values=c("blue", "darkgreen", "red"))+
+  ggtitle('Total Contribution per Occupation Type')+
+  theme(axis.title.y = element_text(size = 15), 
+        plot.title = element_text(hjust = 0.5))
+```
+
+
+
+Not too many of the contributions go towards third party candidates with most of
+the contribution amount going to the Republican candidates. I wasn't surprised 
+to see that most number of people with regular jobs tended to contribute towards
+the democratic party.
+
+Looking at median contributions would help us paint a better picture
+
+
+
+```{r}
+ggplot(data = contb_by_occ, aes(x = reorder(emp_type, median),
+                                y = median))+
+  geom_bar(stat = 'identity', aes(fill = party), position = 'dodge')+
+  ylab('Median Contribution')+
+  xlab('Type of Occupation')+
+  scale_fill_manual(values=c("blue", "darkgreen", "red"))+
+  ggtitle('Median Contribution per Occupation Type')+
+  theme(axis.title.y = element_text(size = 15), 
+        plot.title = element_text(hjust = 0.5))
+```
+
+
+
+Democrats tended to receive smaller donations whereas third party candidates,
+albeit getting much lesser number of contributions, tended to get contributions
+bigger in size.
+
+
+I decided to then go deeper into contributions per location type.
+
+
+
+```{r}
+ggplot(data = con_loc, aes(x = reorder(location_type, total),
+                                y = total))+
+  geom_bar(stat = 'identity', aes(fill = party), position = 'dodge')+
+  ylab('Total Contribution')+
+  xlab('Type of Location')+
+  scale_fill_manual(values=c("blue", "red"))+
+  ggtitle('Total Contribution per Location Type')+
+  theme(axis.title.y = element_text(size = 15), 
+        plot.title = element_text(hjust = 0.5))
+```
+
+
+
+```{r}
+ggplot(data = con_loc, aes(x = reorder(location_type, n),
+                                y = n))+
+  geom_bar(stat = 'identity', aes(fill = party), position = 'dodge')+
+  ylab('Total Number of Contributions')+
+  xlab('Type of Location')+
+  scale_fill_manual(values=c("blue", "red"))+
+  ggtitle('Total Number of Contributions per Location Type')+
+  theme(axis.title.y = element_text(size = 15), 
+        plot.title = element_text(hjust = 0.5))
+```
+
+
+
+In Urban areas, a lot more of the people were contributing money to democratic candidates, therefore we can see that they've contributed more money even thought their median amount(in the following graph) is much lesser.
+
+
+
+```{r}
+ggplot(data = con_loc, aes(x = reorder(location_type, median),
+                                y = median))+
+  geom_bar(stat = 'identity', aes(fill = party), position = 'dodge')+
+  ylab('Median Contributions')+
+  xlab('Type of Location')+
+  scale_fill_manual(values=c("blue", "red"))+
+  ggtitle('Median Contributions per Location Type')+
+  theme(axis.title.y = element_text(size = 15), 
+        plot.title = element_text(hjust = 0.5))
+```
+
+
+
+
+I wanted to have a look at the contributions for the final presidential 
+candidates. So i decided to split the contributions on two maps and check the 
+distribution of contributions in rural and urban areas.
+
+I felt that more people from urban areas would contribute towards Hillary 
+Clinton considering people from cities tend to prefer more progressive 
+candidates. 
+
+
+
+```{r}
+ggplot()+
+  geom_polygon(data = FL, aes(x = long, y = lat),
+               color = 'black', fill = NA)+
+  geom_point(data = presidential, aes(y = latitude, x = longitude,
+                                      size = amount, color = cand_nm),
+             alpha = 0.4)+
+  xlab('Longitude')+
+  ylab('Latitude')+
+  ggtitle('Contributions based on Location')+
+  facet_grid(location_type~.)
+
+```
+
+
+
+
+In an earlier plot, I had shown the number of contributions each candidate
+received over time. Here, I will plot the total amount of contributions each 
+candidate received over time.
+For that, I will group the data by the major candidates defined earlier and 
+by the months of each year.
+
+
+
+```{r}
+by_candidate <- contributions%>%
+  filter(cand_nm %in% major_candidates & amount <15000)%>%
+  group_by(cand_nm, year, month)%>%
+  summarise(total = sum(amount),
+            mean = mean(amount),
+            median = median(amount))
+```
+
+```{r}
+ggplot(data = by_candidate, aes(x = month, y = total))+
+  geom_line(color = 'red', size = 1)+
+  scale_x_continuous(breaks = c(1:12))+
+  ylab('Total Amount of Contribution')+
+  ggtitle('Total Amount of Contributions by Date')+
+  facet_grid(cand_nm~year, scales = 'free_y')
+```
+
+
+
+  
+### Were there any interesting or surprising interactions between features?
+
+From the map, there seems to be a relation between the location type and the 
+kind of candidate they tended to contribute towards between Mrs. Clinton and 
+Donald Trump.
+
+It does seem that people from the bigger cities tended to contribute towards
+Hillary Clinton whereas people from rural areas tended to contribute towards
+Donald Trump.
+
+
+
+------
+
+# Final Plots and Summary
+
+### Plot One
+```{r echo=FALSE, Plot_One}
+ggplot(data = cont_by_comp, aes(x = n, y = median))+
+  geom_point(alpha = 0.4, color = 'red')+
+  scale_y_log10(breaks = c(1,5,10, 50, 100, 250, 500, 1000, 2000))+
+  scale_x_continuous(breaks = c(1, 4, 9, 19, 25, 50, 75, 100))+
+  coord_cartesian(xlim = c(0,100), ylim = c(1,5500))+
+  geom_smooth(method = 'lm', formula = y~x)+
+  geom_vline(xintercept = 4, size = 1,
+             linetype = 'dashed', color = 'dark green')+
+  geom_vline(xintercept = 9, size = 1,
+             linetype = 'dashed', color = 'purple')+
+  geom_vline(xintercept = 19, size = 1,
+             linetype = 'dashed', color = 'black')+
+  geom_line(stat = 'summary', fun.y = 'quantile', fun.args=list(probs=0.9))+
+  xlab('Number of Contributions per Person')+
+  ylab('Median contribution per person ($)')+
+  ggtitle('Relationship between median contribution vs Number of contribution')+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+
+### Description One
+This plot is important because it helps us understand better how people tend 
+to contribute. Initially I assumed that more the number of contributions, 
+greater the total amount of money conributed. But in this case there seems 
+to be a trend opposite of that.
+
+In this dataset, people tended to give larger donations, but few in number, 
+but it in many cases it was larger that the sum of the smaller donations.
+
+The relation is not as strong as I had hoped for as given below.
+
+```{r}
+cor(cont_by_comp$n, cont_by_comp$median)
+```
+
+
+### Plot Two
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(data = presidential, aes(x = date))+
+  geom_freqpoly(aes(color = cand_nm))+
+  geom_vline(xintercept = as.numeric(as.Date("2016-11-09")), size = 1,
+             linetype = 'dashed')+
+  xlab('Date')+
+  ylab('Number of Contributions')+
+  ggtitle('Number of contributions per Final candidate')+
+  geom_vline(xintercept = as.numeric(as.Date('2016-07-20')), size = 1,
+             linetype = 'dashed', color ='green')
+```
+
+
+
+
+### Description Two
+
+
+This graph is very important as it highlights the final presdential candidates
+and shows how contribution patterns change with time. Its clear to see from 
+this graph that Hillary Clinton steadily increased her contributions over time,
+whereas Donald Trump started receiving significant contributions much later.
+
+The table below highlights a few important points.
+
+```{r}
+pres_contb
+```
+
+
+
+
+Hillary Clinton is the top row and Donald Trump is the second.
+
+It shows how Hillary Clinton had a much higher number of contributions(70.1%) of
+all contributions) among the final presidential candidates as well the highest 
+amount in contributions(62.77%), which makes it all the more impressive that 
+Donald Trump won that state, both in the primaries and in the presidential
+elections.
+
+
+
+### Plot Three
+```{r echo=FALSE, Plot_Three}
+ggplot()+
+  geom_polygon(data = FL, aes(x = long, y = lat),
+               color = 'black', fill = NA)+
+  geom_jitter(data = presidential, aes(y = latitude, x = longitude,
+                                      size = amount, color = cand_nm),
+             alpha = 0.4)+
+  xlab('Longitude')+
+  ylab('Latitude')+
+  ggtitle('Contributions based on Location')+
+  facet_grid(location_type~.)
+
+```
+
+
+
+### Description Three
+This plot shows a trend I was really interested in looking at. It shows 
+contribution trends between the two major presidential candidates based on 
+location type. 
+
+The urban map shows a clear difference in contributions between Donald Trump
+and Hillary Clinton, in that Hillary Clinton seems to be getting the lion's 
+share of the contributions.
+
+The difference is not so clear in the rural map. It seems like Hillary Clinton 
+has many more contributions in number, but it is important to remember from this
+representation and earlier ones, that Hillary Clinton had a majority of smaller
+sized donations. The table below will give us a better understanding of the map.
+
+
+
+```{r}
+filter(by_pres_location, cand_nm %in% c('Clinton, Hillary Rodham',
+                                        'Trump, Donald J.'))
+```
+
+
+
+As we can see, there is clear daylight in urban areas where Hillary Clinton has
+many more donations(71,319) than Donald Trump(16,535). In fact, she has almost 4 
+times the number of contributions. She is also beating him in terms of total
+amount of contribution ($11,941,191 vs $2,968,374).
+
+The rural areas are much more interesting. Here again, Hillary Clinton has many
+more contribtuions (110,723) than Donald Trump (59,835). But the difference isnt
+as much as in the urban case. 
+
+
+###Conclusion and Reflection:
+
+1) I couldn't build a linear model for this data set, as there weren't many
+parameters by which I could've created quantitative relationships. Age data 
+or salary range data could've helped understand this dataset better.
+
+2) The top two candidates in the election were also the candidates that 
+received the most amount of money. However, there isn't emough data to 
+confidently suggest that cadidates who received more contributions did 
+better than candidates who didn't.
+
+3) A good estimate of how much each candidate/contributor received/contributed
+is the median of the values. Most of the data is highly skewed with the presence
+of a few outliers.
+
+4) A method of improving this analysis in the future would be to add the votes received by 
+each candidate in both, the primaries and the presidential elections. Then, we 
+could check to see if contributions, in terms of their number or size, had any 
+effect on how people voted for the candidates.
+
+
+
